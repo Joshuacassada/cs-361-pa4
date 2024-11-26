@@ -1,7 +1,6 @@
 //---------------------------------------------------------------------
-// Assignment : PA-03 UDP Single-Threaded Server
-// Date       :
-// Author     : Joshua Cassada and Thomas Cantrell
+// Assignment : PA-04 Multi-Threaded UDP Server
+// Author     : [Your names here]
 // File Name  : factory.c
 //---------------------------------------------------------------------
 
@@ -16,202 +15,162 @@
 #include <stdlib.h>
 #include <signal.h>
 #include <time.h>
-#include <sys/stat.h>
-#include <sys/wait.h>
-
+#include <pthread.h>
 #include "wrappers.h"
 #include "message.h"
 
-#define MAXSTR     200
-#define IPSTRLEN    50
+#define IPSTRLEN 50
 
 typedef struct sockaddr SA;
 
-int minimum(int a, int b)
-{
-    return (a <= b ? a : b);
+typedef struct {
+    int facID;
+    int capacity;
+    int duration;
+} FactoryData;
+
+// Global variables
+int remainsToMake = 0;
+pthread_mutex_t orderMutex = PTHREAD_MUTEX_INITIALIZER;
+int sd;
+struct sockaddr_in srvrSkt, clntSkt;
+time_t startTime;
+
+void* subFactory(void* arg) {
+    FactoryData* data = (FactoryData*)arg;
+    int partsImade = 0, myIterations = 0;
+    
+    printf("Created Factory Thread # %d with capacity = %d parts & duration = %d mSec\n",
+           data->facID, data->capacity, data->duration);
+    
+    while (1) {
+        pthread_mutex_lock(&orderMutex);
+        if (remainsToMake <= 0) {
+            pthread_mutex_unlock(&orderMutex);
+            break;
+        }
+        int toMake = (remainsToMake < data->capacity) ? remainsToMake : data->capacity;
+        remainsToMake -= toMake;
+        pthread_mutex_unlock(&orderMutex);
+
+        partsImade += toMake;
+        myIterations++;
+
+        printf("Factory (by MOHAMED ABOUTABL), # %d Going to make    %d parts in %d mSec\n",
+               data->facID, toMake, data->duration);
+
+        msgBuf msg;
+        msg.purpose = htonl(PRODUCTION_MSG);
+        msg.facID = htonl(data->facID);
+        msg.capacity = htonl(data->capacity);
+        msg.partsMade = htonl(toMake);
+        msg.duration = htonl(data->duration);
+
+        sendto(sd, &msg, sizeof(msg), 0, (SA*)&clntSkt, sizeof(clntSkt));
+        Usleep(data->duration * 1000);
+    }
+
+    msgBuf msg;
+    msg.purpose = htonl(COMPLETION_MSG);
+    msg.facID = htonl(data->facID);
+    msg.partsMade = htonl(partsImade);
+
+    sendto(sd, &msg, sizeof(msg), 0, (SA*)&clntSkt, sizeof(clntSkt));
+
+    printf(">>> Factory # %d : Terminating after making total of %d parts in %d iterations\n",
+           data->facID, partsImade, myIterations);
+           
+    free(data);
+    return NULL;
 }
 
-void subFactory(int factoryID, int myCapacity, int myDuration);
-
-void factLog(char *str)
-{
-    printf("%s", str);
-    fflush(stdout);
-}
-
-// Global Variables
-int remainsToMake,      // Must be protected by a Mutex
-    actuallyMade;       // Actually manufactured items
-int numActiveFactories = 1, orderSize;
-int sd;                 // Server socket descriptor
-struct sockaddr_in srvrSkt,    // Server's address
-                  clntSkt;     // Client's address
-
-//------------------------------------------------------------
-//  Handle Ctrl-C or KILL 
-//------------------------------------------------------------
-void goodbye(int sig) 
-{
-    printf("\n### I (%d) have been nicely asked to TERMINATE. goodbye\n\n", getpid());
-    msgBuf errorMsg;
-    errorMsg.purpose = htonl(PROTOCOL_ERR);
-    sendto(sd, &errorMsg, sizeof(errorMsg), 0, (SA *) &clntSkt, sizeof(clntSkt));
+void goodbye(int sig) {
+    printf("\n### Server (%d) terminating. Goodbye!\n\n", getpid());
+    msgBuf msg;
+    msg.purpose = htonl(PROTOCOL_ERR);
+    sendto(sd, &msg, sizeof(msg), 0, (SA*)&clntSkt, sizeof(clntSkt));
     close(sd);
     exit(0);
 }
 
-/*-------------------------------------------------------*/
-int main(int argc, char *argv[])
-{
-    char *myName = "Joshua Cassada and Thomas Cantrell";
-    unsigned short port = 50015;    // Default port
-    int N = 1;                      // Default number of factories
-
-    printf("\nThis is the FACTORY server developed by %s\n\n", myName);
+int main(int argc, char *argv[]) {
+    char *myName = "MOHAMED ABOUTABL";
+    unsigned short port = 5000;  // Default port is now 5000
+    int N = 1;
     
-    char myUserName[30];
-    char ipStr[IPSTRLEN];
-    getlogin_r(myUserName, 30);
-    time_t now;
-    time(&now);
-    fprintf(stdout, "Logged in as user '%s' on %s\n\n", myUserName, ctime(&now));
-    fflush(stdout);
+    printf("\nThis is the FACTORY server ( by %s )\n\n", myName);
+    printf("I will attempt to accept orders at port %d and use %d sub-factories.\n\n", port, N);
 
-    // Process command line arguments
-    switch (argc) 
-    {
-        case 1:
-            break;
-        case 2:
-            N = atoi(argv[1]);
-            break;
-        case 3:
+    switch (argc) {
+        case 1: break;
+        case 2: N = atoi(argv[1]); break;
+        case 3: 
             N = atoi(argv[1]);
             port = atoi(argv[2]);
             break;
         default:
-            printf("FACTORY Usage: %s [numThreads] [port]\n", argv[0]);
+            printf("Usage: %s [numThreads] [port]\n", argv[0]);
             exit(1);
     }
 
-    // Create and configure server socket
     sd = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sd < 0) {
-        perror("Socket creation failed");
-        exit(EXIT_FAILURE);
-    }
-
-    // Initialize server address structure
-    memset((void *)&srvrSkt, 0, sizeof(srvrSkt));
+    memset(&srvrSkt, 0, sizeof(srvrSkt));
     srvrSkt.sin_family = AF_INET;
     srvrSkt.sin_addr.s_addr = htonl(INADDR_ANY);
     srvrSkt.sin_port = htons(port);
-
-    // Bind socket
-    if (bind(sd, (const struct sockaddr *)&srvrSkt, sizeof(srvrSkt)) < 0) {
-        perror("bind failed");
-        close(sd);
-        exit(EXIT_FAILURE);
-    }
-
-    inet_ntop(AF_INET, &srvrSkt.sin_addr.s_addr, ipStr, IPSTRLEN);
-    printf("Bound socket %d to IP %s Port %d\n", sd, ipStr, ntohs(srvrSkt.sin_port));
-
-    // Set up signal handlers
+    
+    if (bind(sd, (SA*)&srvrSkt, sizeof(srvrSkt)) < 0)
+        err_sys("bind failed");
+    
+    printf("Bound socket %d to IP 0.0.0.0 Port %d\n\n", sd, port);
+    
     sigactionWrapper(SIGINT, goodbye);
     sigactionWrapper(SIGTERM, goodbye);
 
-    while (1)
-    {
-        printf("\nFACTORY server waiting for Order Requests\n");
-
-        // Receive order request
-        msgBuf msg1;
-        memset(&msg1, 0, sizeof(msg1));
+    while (1) {
+        printf("FACTORY server ( by %s ) waiting for Order Requests\n", myName);
+        
+        msgBuf msg;
         socklen_t client_len = sizeof(clntSkt);
+        recvfrom(sd, &msg, sizeof(msg), 0, (SA*)&clntSkt, &client_len);
         
-        if (recvfrom(sd, &msg1, sizeof(msg1), 0, (SA *)&clntSkt, &client_len) < 0){
-            err_sys("recvfrom");
-        };
-    
-
-        printf("\n\nFACTORY server received: ");
-        printMsg(&msg1);
-        puts("");
-        
-        inet_ntop( AF_INET, (void *) & clntSkt.sin_addr.s_addr , ipStr , IPSTRLEN );
+        char ipStr[IPSTRLEN];
+        inet_ntop(AF_INET, &clntSkt.sin_addr, ipStr, IPSTRLEN);
+        printf("\nFACTORY server ( by %s ) received: { REQUEST , OrderSize=%d }\n", 
+               myName, ntohl(msg.orderSize));
         printf("        From IP %s Port %d\n", ipStr, ntohs(clntSkt.sin_port));
 
-        // Store order size (convert from network byte order)
-        orderSize = ntohl(msg1.orderSize);
-
-        // Prepare and send order confirmation with network byte order
-        msg1.purpose = htonl(ORDR_CONFIRM);
-        msg1.numFac = htonl(1);
-        msg1.orderSize = htonl(orderSize);
-
-        if (sendto(sd, &msg1, sizeof(msg1), 0, (SA *)&clntSkt, client_len) < 0) {
-            perror("sendto failed");
-            continue;
-        }
-
-        printf("\n\nFACTORY sent this Order Confirmation to the client ");
-        printMsg(&msg1);
-        puts("");
+        remainsToMake = ntohl(msg.orderSize);
+        startTime = time(NULL);
         
-        remainsToMake = orderSize;
-        subFactory(1, 50, 350);  // Single factory, ID=1, capacity=50, duration=350 ms
-    }
- 
-    return 0;
-}
+        printf("\nFACTORY ( by %s ) sent this Order Confirmation to the client { ORDR_CNFRM , numFacThrds=%d }\n\n",
+               myName, N);
+               
+        // Send order confirmation
+        msg.purpose = htonl(ORDR_CONFIRM);
+        msg.numFac = htonl(N);
+        sendto(sd, &msg, sizeof(msg), 0, (SA*)&clntSkt, client_len);
 
-void subFactory(int factoryID, int myCapacity, int myDuration)
-{
-    char strBuff[MAXSTR];
-    int partsImade = 0, myIterations = 0;
-    msgBuf msg;
-
-    while (1)
-    {
-        if (remainsToMake <= 0)
-            break;
-
-        int toMake = minimum(myCapacity, remainsToMake);
-        remainsToMake -= toMake;
-        partsImade += toMake;
-        myIterations++;
-        printf("Factory # %d: Going to make     %d parts in   %d mSec\n", factoryID, toMake, myDuration);
-
-        Usleep(myDuration * 1000);
-
-        // Send production message with network byte order
-        msg.purpose = htonl(PRODUCTION_MSG);
-        msg.facID = htonl(factoryID);
-        msg.capacity = htonl(myCapacity);
-        msg.partsMade = htonl(toMake);
-        msg.duration = htonl(myDuration);
-
-        if (sendto(sd, &msg, sizeof(msg), 0, (SA *)&clntSkt, sizeof(clntSkt)) < 0) {
-            perror("sendto failed in production message");
-            // Note: We continue production even if sending fails
+        pthread_t threads[20];
+        for (int i = 0; i < N; i++) {
+            FactoryData* data = malloc(sizeof(FactoryData));
+            data->facID = i + 1;
+            data->capacity = 10 + (rand() % 41);  // Random 10-50
+            data->duration = 500 + (rand() % 701); // Random 500-1200
+            
+            Pthread_create(&threads[i], NULL, subFactory, data);
         }
+
+        for (int i = 0; i < N; i++) {
+            Pthread_join(threads[i], NULL);
+        }
+        
+        time_t endTime = time(NULL);
+        printf("\n****** FACTORY ( by %s ) Summary Report ******\n", myName);
+        // The summary will be printed by each thread as they complete
+        printf("Order-to-Completion time = %.1f milliseconds\n\n", 
+               (endTime - startTime) * 1000.0);
     }
-
-    // Send completion message with network byte order
-    memset(&msg, 0, sizeof(msg));
-    msg.purpose = htonl(COMPLETION_MSG);
-    msg.facID = htonl(factoryID);
-    msg.capacity = htonl(myCapacity);
-    msg.partsMade = htonl(partsImade);
-    msg.duration = htonl(myDuration);
-
-    if (sendto(sd, &msg, sizeof(msg), 0, (SA *)&clntSkt, sizeof(clntSkt)) < 0) {
-        perror("sendto failed in completion message");
-    }
-
-    snprintf(strBuff, MAXSTR, ">>> Factory # %-3d: Terminating after making total of %-5d parts in %-4d iterations\n",
-             factoryID, partsImade, myIterations);
-    factLog(strBuff);
+    
+    return 0;
 }
