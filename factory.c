@@ -56,7 +56,7 @@ void* subFactory(void* arg) {
         partsImade += toMake;
         myIterations++;
 
-        printf("Factory (by MOHAMED ABOUTABL), # %d Going to make    %d parts in %d mSec\n",
+        printf("Factory (by Joshua Cassada and Thomas Cantrell), # %d Going to make    %d parts in %d mSec\n",
                data->facID, toMake, data->duration);
 
         msgBuf msg;
@@ -94,7 +94,7 @@ void goodbye(int sig) {
 }
 
 int main(int argc, char *argv[]) {
-    char *myName = "MOHAMED ABOUTABL";
+    char *myName = "Joshua Cassada and Thomas Cantrell";
     unsigned short port = 5000;  // Default port is now 5000
     int N = 1;
     

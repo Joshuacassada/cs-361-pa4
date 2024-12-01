@@ -122,8 +122,9 @@ int main(int argc, char *argv[])
 
     // Convert received values from network to host byte order
     numFactories = ntohl(msg2.numFac);
-    orderSize = ntohl(msg2.orderSize);  // Make sure we have the confirmed order size
+    orderSize = ntohl(msg2.orderSize);  
     activeFactories = numFactories;
+    time_t startTime = time(NULL);
 
     // Monitor all Active Factory Lines & Collect Production Reports
     while (activeFactories > 0) 
@@ -159,6 +160,7 @@ int main(int argc, char *argv[])
         }
     }
 
+    time_t endTime = time(NULL);
     // Print the summary report
     totalItems = 0;
     printf("\n\n****** PROCUREMENT Summary Report ******\n");
@@ -168,9 +170,12 @@ int main(int argc, char *argv[])
                i, partsMade[i], iters[i]);
         totalItems += partsMade[i];
     }
+    
 
     printf("==============================\n");
     printf("Grand total parts made = %d   vs order size of   %d\n", totalItems, orderSize);
+    printf("Order-to-Completion time = %.1f milliseconds\n\n", 
+               (endTime - startTime) * 1000.0);
 
     if (totalItems == orderSize) {
         printf("\n>>> PROCUREMENT Terminated\n");

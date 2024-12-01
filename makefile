@@ -1,7 +1,7 @@
 all: procurement  factory
-    
-#procurement: procurement.c  wrappers.c  wrappers.h message.c message.h
-#	gcc -pthread  procurement.c  wrappers.c  message.c  -o procure
+
+procurement: procurement.c  wrappers.c  wrappers.h message.c message.h
+	gcc -pthread  procurement.c  wrappers.c  message.c  -o procurement
 
 factory: factory.c  wrappers.c  wrappers.h message.c  message.h
 	gcc -pthread  factory.c     wrappers.c  message.c  -o factory
