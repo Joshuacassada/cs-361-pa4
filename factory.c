@@ -145,7 +145,8 @@ int main(int argc, char *argv[]) {
         printf("        From IP %s Port %d\n", ipStr, ntohs(clntSkt.sin_port));
 
         activeThreads = ntohl(msg.orderSize);
-        startTime = time(NULL);
+        struct timeval startTime;
+        gettimeofday(&startTime, NULL);
         
         printf("\nFACTORY ( by %s ) sent this Order Confirmation to the client { ORDR_CNFRM , numFacThrds=%d }\n\n",
                myName, N);
@@ -174,11 +175,14 @@ int main(int argc, char *argv[]) {
             Pthread_join(threads[i], NULL);
         }
         
-        time_t endTime = time(NULL);
+        
+        struct timeval endTime;
+        gettimeofday(&endTime, NULL);
+        double elapsedMS = (endTime.tv_sec - startTime.tv_sec) * 1000.0 + // Seconds to ms
+                           (endTime.tv_usec - startTime.tv_usec) / 1000.0; 
+
         printf("\n****** FACTORY ( by %s ) Summary Report ******\n", myName);
-        // The summary will be printed by each thread as they complete
-        printf("Order-to-Completion time = %.1f milliseconds\n\n", 
-               (endTime - startTime) * 1000.0);
+        printf("Order-to-Completion time = %.1f milliseconds\n\n", elapsedMS);
     }
     
     return 0;

@@ -124,9 +124,11 @@ int main(int argc, char *argv[])
     numFactories = ntohl(msg2.numFac);
     orderSize = ntohl(msg2.orderSize);  
     activeFactories = numFactories;
-    time_t startTime = time(NULL);
+    struct timeval start, end;
+    gettimeofday(&start, NULL);
 
     // Monitor all Active Factory Lines & Collect Production Reports
+
     while (activeFactories > 0) 
     {
         msgBuf msg;
@@ -159,8 +161,9 @@ int main(int argc, char *argv[])
             exit(1);
         }
     }
-
-    time_t endTime = time(NULL);
+    gettimeofday(&end, NULL);
+    double elapsed = (end.tv_sec - start.tv_sec) * 1000.0 +
+                        (end.tv_usec - start.tv_usec) / 1000.0;
     // Print the summary report
     totalItems = 0;
     printf("\n\n****** PROCUREMENT Summary Report ******\n");
@@ -174,8 +177,7 @@ int main(int argc, char *argv[])
 
     printf("==============================\n");
     printf("Grand total parts made = %d   vs order size of   %d\n", totalItems, orderSize);
-    printf("Order-to-Completion time = %.1f milliseconds\n\n", 
-               (endTime - startTime) * 1000.0);
+    printf("Order-to-Completion time = %.1f milliseconds\n\n", elapsed);
 
     if (totalItems == orderSize) {
         printf("\n>>> PROCUREMENT Terminated\n");
