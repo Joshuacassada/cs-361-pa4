@@ -1,9 +1,3 @@
-//---------------------------------------------------------------------
-// Assignment : PA-04 Multi-Threaded UDP Server
-// Author     : [Your names here]
-// File Name  : factory.c
-//---------------------------------------------------------------------
-
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -14,7 +8,7 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <signal.h>
-#include <time.h>
+#include <sys/time.h>
 #include <pthread.h>
 #include "wrappers.h"
 #include "message.h"
@@ -24,7 +18,6 @@
 
 typedef struct sockaddr SA;
 
-
 typedef struct {
     int facID;
     int capacity;
@@ -33,16 +26,18 @@ typedef struct {
 
 // Global variables
 int activeThreads = 0;
+int totalPartsPerFactory[MAXFACTORIES];
+int iterationsPerFactory[MAXFACTORIES];
 pthread_mutex_t orderMutex = PTHREAD_MUTEX_INITIALIZER;
 int sd;
 struct sockaddr_in srvrSkt, clntSkt;
-time_t startTime;
+char *myName;
 
 void* subFactory(void* arg) {
     FactoryData* data = (FactoryData*)arg;
     int partsImade = 0, myIterations = 0;
     
-    printf("Created Factory Thread # %d with capacity = %d parts & duration = %d mSec\n",
+    printf("Created Factory Thread # %d with capacity = %2d parts & duration = %4d mSec\n",
            data->facID, data->capacity, data->duration);
     
     while (1) {
@@ -58,8 +53,8 @@ void* subFactory(void* arg) {
         partsImade += toMake;
         myIterations++;
 
-        printf("Factory (by Joshua Cassada and Thomas Cantrell), # %d Going to make    %d parts in %d mSec\n",
-               data->facID, toMake, data->duration);
+        printf("Factory (%s), # %d: Going to make    %2d parts in %4d mSec\n",
+               myName, data->facID, toMake, data->duration);
 
         msgBuf msg;
         msg.purpose = htonl(PRODUCTION_MSG);
@@ -69,7 +64,7 @@ void* subFactory(void* arg) {
         msg.duration = htonl(data->duration);
 
         sendto(sd, &msg, sizeof(msg), 0, (SA*)&clntSkt, sizeof(clntSkt));
-        Usleep(data->duration * 1000);
+        usleep(data->duration * 1000);
     }
 
     msgBuf msg;
@@ -81,9 +76,10 @@ void* subFactory(void* arg) {
 
     printf(">>> Factory # %d : Terminating after making total of %d parts in %d iterations\n",
            data->facID, partsImade, myIterations);
-
-    
            
+    totalPartsPerFactory[data->facID - 1] = partsImade;
+    iterationsPerFactory[data->facID - 1] = myIterations;
+    
     free(data);
     pthread_exit(NULL);
 }
@@ -98,8 +94,8 @@ void goodbye(int sig) {
 }
 
 int main(int argc, char *argv[]) {
-    char *myName = "Joshua Cassada and Thomas Cantrell";
-    unsigned short port = 5000;  // Default port is now 5000
+    myName = "Joshua Cassada and Thomas Cantrell";
+    unsigned short port = 5000;
     int N = 1;
     
     printf("\nThis is the FACTORY server ( by %s )\n\n", myName);
@@ -145,43 +141,48 @@ int main(int argc, char *argv[]) {
         printf("        From IP %s Port %d\n", ipStr, ntohs(clntSkt.sin_port));
 
         activeThreads = ntohl(msg.orderSize);
+        
         struct timeval startTime;
         gettimeofday(&startTime, NULL);
         
-        printf("\nFACTORY ( by %s ) sent this Order Confirmation to the client { ORDR_CNFRM , numFacThrds=%d }\n\n",
-               myName, N);
-               
-        // Send order confirmation
         msg.purpose = htonl(ORDR_CONFIRM);
         msg.numFac = htonl(N);
         sendto(sd, &msg, sizeof(msg), 0, (SA*)&clntSkt, client_len);
+        
+        printf("\nFACTORY ( by %s ) sent this Order Confirmation to the client { ORDR_CNFRM , numFacThrds=%d }\n\n",
+               myName, N);
 
         pthread_t threads[MAXFACTORIES];
         for (int i = 0; i < N; i++) {
             FactoryData* data = malloc(sizeof(FactoryData));
             data->facID = i + 1;
-            data->capacity = 10 + (rand() % 41);  // Random 10-50
-            data->duration = 500 + (rand() % 701); // Random 500-1200
-
-            pthread_mutex_lock(&orderMutex);
-            activeThreads++;
-            pthread_mutex_unlock(&orderMutex);
+            data->capacity = 10 + (rand() % 41);
+            data->duration = 500 + (rand() % 701);
             
             Pthread_create(&threads[i], NULL, subFactory, data);
-
         }
 
         for (int i = 0; i < N; i++) {
             Pthread_join(threads[i], NULL);
         }
         
-        
         struct timeval endTime;
         gettimeofday(&endTime, NULL);
-        double elapsedMS = (endTime.tv_sec - startTime.tv_sec) * 1000.0 + // Seconds to ms
-                           (endTime.tv_usec - startTime.tv_usec) / 1000.0; 
+        double elapsedMS = (endTime.tv_sec - startTime.tv_sec) * 1000.0 +
+                          (endTime.tv_usec - startTime.tv_usec) / 1000.0;
 
-        printf("\n****** FACTORY ( by %s ) Summary Report ******\n", myName);
+        printf("\n****** FACTORY Server ( by %s ) Summary Report *******\n", myName);
+        printf("Sub-Factory      Parts Made      Iterations\n");
+
+        int grandTotal = 0;
+        for (int i = 0; i < N; i++) {
+            printf("     %d             %2d              %d\n", 
+                   i + 1, totalPartsPerFactory[i], iterationsPerFactory[i]);
+            grandTotal += totalPartsPerFactory[i];
+        }
+        printf("============================================\n");
+        printf("Grand total parts made  =  %d  vs  order size of   %d\n\n", 
+               grandTotal, ntohl(msg.orderSize));
         printf("Order-to-Completion time = %.1f milliseconds\n\n", elapsedMS);
     }
     
