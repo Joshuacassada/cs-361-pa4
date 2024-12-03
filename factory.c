@@ -20,8 +20,10 @@
 #include "message.h"
 
 #define IPSTRLEN 50
+#define MAXFACTORIES 20
 
 typedef struct sockaddr SA;
+
 
 typedef struct {
     int facID;
@@ -30,7 +32,7 @@ typedef struct {
 } FactoryData;
 
 // Global variables
-int remainsToMake = 0;
+int activeThreads = 0;
 pthread_mutex_t orderMutex = PTHREAD_MUTEX_INITIALIZER;
 int sd;
 struct sockaddr_in srvrSkt, clntSkt;
@@ -45,12 +47,12 @@ void* subFactory(void* arg) {
     
     while (1) {
         pthread_mutex_lock(&orderMutex);
-        if (remainsToMake <= 0) {
+        if (activeThreads <= 0) {
             pthread_mutex_unlock(&orderMutex);
             break;
         }
-        int toMake = (remainsToMake < data->capacity) ? remainsToMake : data->capacity;
-        remainsToMake -= toMake;
+        int toMake = (activeThreads < data->capacity) ? activeThreads : data->capacity;
+        activeThreads -= toMake;
         pthread_mutex_unlock(&orderMutex);
 
         partsImade += toMake;
@@ -79,9 +81,11 @@ void* subFactory(void* arg) {
 
     printf(">>> Factory # %d : Terminating after making total of %d parts in %d iterations\n",
            data->facID, partsImade, myIterations);
+
+    
            
     free(data);
-    return NULL;
+    pthread_exit(NULL);
 }
 
 void goodbye(int sig) {
@@ -140,7 +144,7 @@ int main(int argc, char *argv[]) {
                myName, ntohl(msg.orderSize));
         printf("        From IP %s Port %d\n", ipStr, ntohs(clntSkt.sin_port));
 
-        remainsToMake = ntohl(msg.orderSize);
+        activeThreads = ntohl(msg.orderSize);
         startTime = time(NULL);
         
         printf("\nFACTORY ( by %s ) sent this Order Confirmation to the client { ORDR_CNFRM , numFacThrds=%d }\n\n",
@@ -151,14 +155,19 @@ int main(int argc, char *argv[]) {
         msg.numFac = htonl(N);
         sendto(sd, &msg, sizeof(msg), 0, (SA*)&clntSkt, client_len);
 
-        pthread_t threads[20];
+        pthread_t threads[MAXFACTORIES];
         for (int i = 0; i < N; i++) {
             FactoryData* data = malloc(sizeof(FactoryData));
             data->facID = i + 1;
             data->capacity = 10 + (rand() % 41);  // Random 10-50
             data->duration = 500 + (rand() % 701); // Random 500-1200
+
+            pthread_mutex_lock(&orderMutex);
+            activeThreads++;
+            pthread_mutex_unlock(&orderMutex);
             
             Pthread_create(&threads[i], NULL, subFactory, data);
+
         }
 
         for (int i = 0; i < N; i++) {
